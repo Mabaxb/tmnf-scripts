@@ -119,6 +119,21 @@ if (blocksPath is not null && File.Exists(blocksPath))
 }
 else Console.WriteLine("Warning: blocks.txt not found; blocks bigger than 1x1 may be misplaced in rotated modules.");
 
+// Checkpoints that aren't simply rotated when a two-way checkpoint module is driven backwards:
+// turned 180 degrees, <block> becomes <other block>, plus a direction offset. Works both ways.
+var flipOf = new Dictionary<string, (string Name, int Off)>(StringComparer.Ordinal);
+foreach (var (a, b, off) in new[]
+{
+    ("StadiumRoadMainCheckpointRight", "StadiumRoadMainCheckpointLeft", 2),
+    ("StadiumPlatformCheckpointRight", "StadiumPlatformCheckpointLeft", 2),
+    ("StadiumPlatformCheckpointUp", "StadiumPlatformCheckpointDown", 2),
+    ("StadiumRoadMainCheckpointUp", "StadiumRoadMainCheckpointDown", 2),
+})
+{
+    flipOf[a] = (b, off);
+    flipOf[b] = (a, (4 - off) % 4);
+}
+
 // Block types in the whitelist map are never removed from underneath a module.
 var underWhitelist = new HashSet<string>(StringComparer.Ordinal);
 if (whitelistPath is not null && File.Exists(whitelistPath))
@@ -440,12 +455,19 @@ void Build(List<Step> rt)
                 if (clash) { extDropped++; continue; }
 
                 // Checkpoint modules driven against their arrow get the checkpoint turned around.
-                int turn = st.Rev && t.Name.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
+                // (some checkpoints become a different block instead of just being rotated, see flipOf).
+                string name = t.Name;
+                int dir = (t.Dir + st.R) % 4;
+                if (st.Rev && t.Name.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (flipOf.TryGetValue(t.Name, out var fo)) { name = fo.Name; dir = (dir + fo.Off) % 4; }
+                    else dir = (dir + 2) % 4;
+                }
 
                 map.PlaceBlock(new CGameCtnBlock
                 {
-                    Name = t.Name,
-                    Direction = (Direction)((t.Dir + st.R + turn) % 4),
+                    Name = name,
+                    Direction = (Direction)dir,
                     Coord = coord,
                     Flags = t.Flags & ~RefBits,
                 });
@@ -460,6 +482,7 @@ void Build(List<Step> rt)
         for (int s = 0; s < rt.Count; s++)
         {
             var st = rt[s];
+            if (st.M.NoAbove) continue; // "na" modules stay open above: no roof
             int y = floorY + 3 * (st.Floor + st.M.Span);
             if (y >= size.Y) continue;
             foreach (var (ax, az) in st.Cells)
@@ -616,7 +639,9 @@ static List<Module> ReadModules(string path)
         if (char.IsDigit(parts[1][0]) && parts[1].Contains('x', StringComparison.OrdinalIgnoreCase))
         {
             var cd = parts[1].ToLowerInvariant().Split('x');
-            wc = int.Parse(cd[0]); dc = int.Parse(cd[1]); idx = 2;
+            if (cd.Length != 2 || !int.TryParse(cd[0], out wc) || !int.TryParse(cd[1], out dc))
+                throw new FormatException($"line {lineNo}: bad size '{parts[1]}' (expected e.g. 2x2)");
+            idx = 2;
         }
         var kind = parts[idx].ToLowerInvariant();
         if (kind is not ("start" or "finish" or "checkpoint" or "normal"))
@@ -672,8 +697,11 @@ static List<Module> ReadModules(string path)
         else if (cpFaces is not null) throw new FormatException($"line {lineNo}: cp: is only for checkpoint modules");
 
         int span = 1 + routes.SelectMany(r => new[] { r.In, r.Out }).Max(o => o?.Up ?? 0);
+        if (!xz.All(v => int.TryParse(v, out _))) throw new FormatException($"line {lineNo}: bad coordinates '{parts[0]}' (expected x,z or x,y,z)");
         int mx = int.Parse(xz[0]), mz = int.Parse(xz[^1]);
         int? my = xz.Length == 3 ? int.Parse(xz[1]) : null;
+        var dup = list.FirstOrDefault(q => q.X == mx && q.Z == mz && q.FloorY == my);
+        if (dup is not null) throw new FormatException($"line {lineNo}: {parts[0]} is already used by another module ({dup.Id})");
         list.Add(new Module(parts[0], mx, mz, wc, dc, kind, routes, span) { NoBelow = noBelow, NoAbove = noAbove, FloorY = my });
     }
     return list;
@@ -690,7 +718,11 @@ static Opening ParseOpening(string s, int wc, int dc, int lineNo)
     s = s.Replace("^", "").Replace("~", "");
     int n = 0;
     var at = s.IndexOf('@');
-    if (at >= 0) { n = int.Parse(s[(at + 1)..]); s = s[..at]; }
+    if (at >= 0)
+    {
+        if (!int.TryParse(s[(at + 1)..], out n)) throw new FormatException($"line {lineNo}: bad cell number in '{s}' (expected e.g. +x@1)");
+        s = s[..at];
+    }
     int side = s.ToLowerInvariant() switch
     {
         "+x" => 0, "+z" => 1, "-x" => 2, "-z" => 3,
