@@ -67,11 +67,12 @@ How it works:
 
 - **Modules** are built in a base map (`RPG_Modules_Base.Challenge.Gbx`) as 3x3-block cells. Big modules can span several cells, including L-shapes. Modules can be stored on several layers of the base map.
 - **`modules.txt`** says where each module is, its type (start, finish, checkpoint, normal) and how the road goes through it. That covers one-way or two-way, floor changes (`^`), narrow openings (`~`), checkpoint direction (`cp:`) and nothing below/above (`nb`/`na`). The format is explained at the top of the file.
-- **Rotation:** modules are rotated to fit the route. Checkpoints are turned around when a two-way checkpoint module is driven backwards. Blocks bigger than 1x1 are rotated using their size from `blocks.txt`.
+- **Rotation:** modules are rotated to fit the route. Checkpoints are turned around when a two-way checkpoint module is driven backwards; tilted and sloped checkpoints (Left/Right, Up/Down) are swapped for their counterpart instead. Blocks bigger than 1x1 are rotated using their size from `blocks.txt`.
 - **Blocks just outside a module:** blocks up to 1 outside a module's body belong to it. Side blocks are dropped where they would land in another module. Blocks underneath are only dropped where they clash with an actual block, and never if they are taller than 1 or listed in `Block_Whitelist.Challenge.Gbx`.
-- **Roofs:** open spots above modules get a roof (`--nr` to turn this off).
+- **Roofs:** open spots above modules get a roof (`--nr` to turn this off). Modules marked `na` stay open above.
 - **Checkpoints** are placed every 3–6 modules by default (`--cp-gap`, `--cp-every`, `-c`).
-- **Output** is named `maze1`, `maze2`, … (`--rn` sets your own name).
+- **Output** is named `maze1`, `maze2`, … (`--rn` sets your own name). `--start x,z`, `-f` and `-g` control where the start goes, how many floors and how big the grid is.
+- **Errors in `modules.txt`** (bad sides, `@` numbers outside a module, duplicate coordinates) are reported with their line number.
 
 Map size: by default the maze fits the standard 32×32×32 Stadium. `--fit` ignores that, builds freely, then sizes the map to the maze. Block coordinates can go up to 255. Maps bigger than 32 need TMUnlimiter. You have to manually remove the stadium with TMUnlimiter.
 
