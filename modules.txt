@@ -1,0 +1,91 @@
+# Maze modules for tmmaze.cs, read from "RPG_modules_base.Challenge.Gbx".
+#
+# Each line:  <x>,<z>  [<cells>]  <kind>  <openings>
+#   x,z      = lowest corner of the module's main body in the base map (block coordinates).
+#   x,y,z    = same, for modules stored higher up: y = the module's floor height (bottom layer = 4).
+#              Blocks up to 1 outside the body (sides and below) belong to the module too;
+#              in the maze they're dropped where they would overlap another module.
+#   cells    = size in 3x3 cells, along X then Z (default 1x1). L-shapes: the cells without
+#              blocks are left out automatically.
+#   kind     = start | finish | checkpoint | normal
+#   openings = where the road goes through, as map directions:
+#                +x = screenshot up, -x = down, +z = right, -z = left
+#              in:<side> out:<side>   one-way (arrow in the screenshot)
+#              both:<side>,<side>     two-way (line without arrow)
+#              out:<side>             start only;  in:<side>  finish only
+#              @n   which cell on that side for big modules, counted from low X / low Z (default 0)
+#              ^    that side is one floor (3 blocks) higher
+#              ~    narrow opening. A narrow exit can lead into a normal or narrow entrance,
+#                   but a normal exit can't lead into a narrow entrance.
+#                   Suffixes combine in any order, e.g. out:+z@1^~
+#              cp:<side>  checkpoint modules: the side the checkpoint faces, i.e. where you leave the
+#                         module when driving through the checkpoint the right way. When the route
+#                         drives through it the other way, the checkpoint is turned around.
+#                         (One-way checkpoint modules can skip it: they always face their out: side.)
+#   nb       = (optional) nothing may be placed on the floor directly below this module
+#   na       = (optional) nothing may be placed on the floor directly above this module
+#
+# Modules are rotated automatically to fit the route.
+
+# --- row 1 (top of screenshot) ---
+29,0          start       out:-x                 # green
+29,5          normal      in:+x out:-x           # straight, one-way
+29,10         normal      in:+x out:+z           # L-turn, one-way
+29,15         normal      both:+x,-z             # L-turn
+29,20         checkpoint  both:+x,-x  cp:-x      # blue, both ways
+29,25         normal      both:+x,-x^            # black: ramp up/down
+
+# --- row 2 ---
+24,0          normal      in:+x out:+z           # L-turn, one-way
+24,5          normal      both:+x,-x             # straight
+24,10         normal      in:+x out:+z           # L-turn, one-way
+24,15         normal      in:+x out:+z           # L-turn, one-way
+24,20         normal      both:+x,-x  na         # straight
+24,25         normal      both:+x,+z^            # black: L-turn up/down
+
+# --- row 3 ---
+19,0          normal      both:+x,-x             # straight
+19,5          normal      both:+x,-x             # straight
+19,10         finish      in:+x                  # red
+19,15         normal      in:+x out:+z           # L-turn, one-way
+19,20         checkpoint  both:+x,+z  cp:+z      # blue L-turn, both ways
+19,25         normal      both:+x,+z^            # black: L-turn up/down
+
+# --- row 4: big modules ---
+14,0   1x2    normal      in:+x@0 out:-x@1           # 3x6 S-bend, one-way
+11,8   2x2    normal      in:-x@0 out:+z@1           # L-shape, one-way
+11,16  2x2    normal      in:+x@0 out:-x@1           # 6x6 diagonal, one-way
+11,24  2x2    checkpoint  both:-x@0,+z@1^  cp:+z@1   # L-shape: up one floor + checkpoint, both ways
+
+# --- row 5: big modules ---
+6,0    1x2    normal      in:-z@0 out:+z@0              # long straight, one-way
+3,8    2x2    checkpoint  both:+x@0,-x@0  cp:+x@0       # checkpoint straight, both ways
+3,16   2x2    checkpoint  both:-x@0,+z@1  cp:+z@1  nb   # checkpoint L-turn, both ways, nothing directly below
+3,24   2x2    normal      both:-x@0^,-x@1               # black U-turn up/down (left leg is the high one)
+
+# ===== layer 2: modules stored at floor height 13 =====
+
+# --- row 1 ---
+29,13,0       normal      both:+x,+z             # L-turn
+29,13,5       normal      both:+x,+z~            # L-turn
+29,13,10      normal      both:+x~,+z            # L-turn
+29,13,15      normal      in:+x~ out:-x          # straight
+29,13,20      normal      in:+x out:+z           # L-turn, one-way
+
+# --- row 2 ---
+24,13,0       normal      both:+x,-x  nb         # straight, nothing directly below
+24,13,5       normal      both:+x~,-x~           # straight
+24,13,10      normal      both:+x,-x~            # straight
+24,13,15      normal      both:+x,-x             # straight
+24,13,20      normal      both:+x,-x             # straight
+
+# --- row 3 ---
+19,13,0       checkpoint  both:+x~,-x  cp:-x     # blue, one-way
+19,13,5       normal      in:-x out:+x           # straight, one-way 
+19,13,10      normal      in:+z out:+x           # L-turn, one-way 
+
+# --- row 4: big modules ---
+14,13,0  1x2  normal      both:+x@0,-x@1             # 3x6 S-bend
+11,13,8  2x2  normal      both:-x@0,+x@1^            # black diagonal: 
+11,13,16 2x2  normal      in:-x@0^ out:+z@1^  nb       # checkpoint L-turn, both ways, nothing directly below
+14,13,24 1x2  checkpoint  both:-x@0,+z@0^   cp:+z@0
