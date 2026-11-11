@@ -37,6 +37,7 @@ bool test = false, fit = false, maxMode = false, lengthSet = false;
 int cpGapMin = 3, cpGapMax = 6;
 bool cpsSet = false;
 long maxBudget = 1_000_000;
+int maxKb = 256;
 int? seed = null, gridW = null, gridD = null;
 (int X, int Z)? startCell = null;
 
@@ -75,6 +76,7 @@ try
                 if (every <= 0) { cpGapMin = cpGapMax = int.MaxValue; } else { cpGapMin = cpGapMax = every; }
                 break;
             case "--budget": maxBudget = long.Parse(Next()); break;
+            case "--max-kb": maxKb = int.Parse(Next()); break;
             case "--tries": tries = int.Parse(Next()); break;
             case "-o": case "--out": outPath = Next(); break;
             case "--rn": case "--rename": newName = Next(); break;
@@ -301,7 +303,7 @@ bool Place(int i, int cx, int cz, (int Side, int Level, bool Narrow)? entry)
         int low = m.NoBelow ? Math.Max(0, floor - 1) : floor, high = floor + m.Span + (m.NoAbove ? 1 : 0);
         foreach (var (ax, az) in cells)
             for (int k = low; k < high; k++) occupied.Add((ax, az, k));
-        route.Add(new Step(m, r, origin.X, origin.Z, floor, cells, rev));
+        route.Add(new Step(m, r, origin.X, origin.Z, floor, cells, rev, outp));
         uses[m]++;
         if (!maxMode && (test ? m.Kind == "finish" : i == length - 1)) return true;
 
@@ -368,100 +370,108 @@ if (!found)
     return 3;
 }
 
-// Outer edges of the maze in grid cells.
-int minCX = int.MaxValue, maxCX = int.MinValue, minCZ = int.MaxValue, maxCZ = int.MinValue;
-foreach (var q in route)
-    foreach (var (qx, qz) in q.Cells)
-    {
-        minCX = Math.Min(minCX, qx); maxCX = Math.Max(maxCX, qx);
-        minCZ = Math.Min(minCZ, qz); maxCZ = Math.Max(maxCZ, qz);
-    }
-if (fit)
-{
-    // Leave 1 block around the maze for side extensions; never make the map smaller than the base map.
-    ox = 1 - 3 * minCX; oz = 1 - 3 * minCZ;
-    int topY = floorY + 3 * route.Max(q => q.Floor + q.M.Span) + 1;
-    size = new Int3(Math.Max(size.X, 3 * (maxCX - minCX + 1) + 2), Math.Max(size.Y, topY + 1), Math.Max(size.Z, 3 * (maxCZ - minCZ + 1) + 2));
-    map.Size = size;
-}
-
-// ------------------------------------------------------------------ build the map
-// 1. module bodies
-// 2. extensions: side blocks are dropped if they land in another module's cells (even in its air);
-//    under blocks are only dropped if another module already has a block on that exact spot
-// 3. roofs on empty spots above modules
 const int RefBits = (1 << 15) | (1 << 17) | (1 << 18) | (1 << 19) | (1 << 20); // skins/special props: not copied
-
-var volume = new Dictionary<Int3, int>(); // every coordinate inside a module's cells and floors -> route index
-for (int s = 0; s < route.Count; s++)
-{
-    var st = route[s];
-    foreach (var (ax, az) in st.Cells)
-        for (int lx = 0; lx < 3; lx++)
-            for (int lz = 0; lz < 3; lz++)
-                for (int y = floorY + 3 * st.Floor; y < floorY + 3 * (st.Floor + st.M.Span); y++)
-                    volume[new Int3(ox + 3 * ax + lx, y, oz + 3 * az + lz)] = s;
-}
-
-map.Blocks!.Clear();
-var placedBy = new Dictionary<Int3, int>(); // coordinate -> route index of the module that placed a block there
+var baseSize = size;
+int minCX = 0, maxCX = 0, minCZ = 0, maxCZ = 0;
 int bodies = 0, exts = 0, extDropped = 0, outside = 0, roofs = 0;
 
-foreach (var phaseExt in new[] { false, true })
+// Puts the blocks of a route into the map (replacing what was there).
+void Build(List<Step> rt)
 {
-    for (int s = 0; s < route.Count; s++)
-    {
-        var st = route[s];
-        foreach (var t in st.M.Blocks)
+    // Outer edges of the maze in grid cells.
+    minCX = int.MaxValue; maxCX = int.MinValue; minCZ = int.MaxValue; maxCZ = int.MinValue;
+    foreach (var q in rt)
+        foreach (var (qx, qz) in q.Cells)
         {
-            if ((t.Ext != Ext.None) != phaseExt) continue;
-            // Rotate the block's whole footprint and take its new lowest corner.
-            var (fx, fy, fz) = footprint.GetValueOrDefault(t.Name, (1, 1, 1));
-            if (t.Dir % 2 == 1) (fx, fz) = (fz, fx); // footprint as placed in the base map
-            var (x1, z1) = st.M.RotPoint(t.X, t.Z, st.R);
-            var (x2, z2) = st.M.RotPoint(t.X + fx - 1, t.Z + fz - 1, st.R);
-            int rx = Math.Min(x1, x2), rz = Math.Min(z1, z2);
-            var coord = new Int3(ox + 3 * st.OX + rx, floorY + 3 * st.Floor + t.Y, oz + 3 * st.OZ + rz);
-            if (coord.X < 0 || coord.Y < 0 || coord.Z < 0 || coord.X >= size.X || coord.Y >= size.Y || coord.Z >= size.Z)
-            { outside++; continue; }
-            bool clash = placedBy.TryGetValue(coord, out var p) && p != s;
-            if (t.Ext == Ext.Side && volume.TryGetValue(coord, out var v) && v != s) clash = true;
-            // Under-blocks that are taller than 1 or whitelisted are never removed.
-            if (t.Ext == Ext.Under && (fy > 1 || underWhitelist.Contains(t.Name))) clash = false;
-            if (clash) { extDropped++; continue; }
-
-            // Checkpoint modules driven against their arrow get the checkpoint turned around.
-            int turn = st.Rev && t.Name.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
-
-            map.PlaceBlock(new CGameCtnBlock
-            {
-                Name = t.Name,
-                Direction = (Direction)((t.Dir + st.R + turn) % 4),
-                Coord = coord,
-                Flags = t.Flags & ~RefBits,
-            });
-            placedBy.TryAdd(coord, s);
-            if (t.Ext != Ext.None) exts++; else bodies++;
+            minCX = Math.Min(minCX, qx); maxCX = Math.Max(maxCX, qx);
+            minCZ = Math.Min(minCZ, qz); maxCZ = Math.Max(maxCZ, qz);
         }
-    }
-}
-
-if (roofBlock is not null)
-{
-    for (int s = 0; s < route.Count; s++)
+    if (fit)
     {
-        var st = route[s];
-        int y = floorY + 3 * (st.Floor + st.M.Span);
-        if (y >= size.Y) continue;
+        // Leave 1 block around the maze for side extensions; never make the map smaller than the base map.
+        ox = 1 - 3 * minCX; oz = 1 - 3 * minCZ;
+        int topY = floorY + 3 * rt.Max(q => q.Floor + q.M.Span) + 1;
+        size = new Int3(Math.Max(baseSize.X, 3 * (maxCX - minCX + 1) + 2), Math.Max(baseSize.Y, topY + 1), Math.Max(baseSize.Z, 3 * (maxCZ - minCZ + 1) + 2));
+        map.Size = size;
+    }
+
+    // ------------------------------------------------------------------ build the map
+    // 1. module bodies
+    // 2. extensions: side blocks are dropped if they land in another module's cells (even in its air);
+    //    under blocks are only dropped if another module already has a block on that exact spot
+    // 3. roofs on empty spots above modules
+
+    var volume = new Dictionary<Int3, int>(); // every coordinate inside a module's cells and floors -> rt index
+    for (int s = 0; s < rt.Count; s++)
+    {
+        var st = rt[s];
         foreach (var (ax, az) in st.Cells)
             for (int lx = 0; lx < 3; lx++)
                 for (int lz = 0; lz < 3; lz++)
+                    for (int y = floorY + 3 * st.Floor; y < floorY + 3 * (st.Floor + st.M.Span); y++)
+                        volume[new Int3(ox + 3 * ax + lx, y, oz + 3 * az + lz)] = s;
+    }
+
+    map.Blocks!.Clear();
+    var placedBy = new Dictionary<Int3, int>(); // coordinate -> rt index of the module that placed a block there
+    bodies = exts = extDropped = outside = roofs = 0;
+
+    foreach (var phaseExt in new[] { false, true })
+    {
+        for (int s = 0; s < rt.Count; s++)
+        {
+            var st = rt[s];
+            foreach (var t in st.M.Blocks)
+            {
+                if ((t.Ext != Ext.None) != phaseExt) continue;
+                // Rotate the block's whole footprint and take its new lowest corner.
+                var (fx, fy, fz) = footprint.GetValueOrDefault(t.Name, (1, 1, 1));
+                if (t.Dir % 2 == 1) (fx, fz) = (fz, fx); // footprint as placed in the base map
+                var (x1, z1) = st.M.RotPoint(t.X, t.Z, st.R);
+                var (x2, z2) = st.M.RotPoint(t.X + fx - 1, t.Z + fz - 1, st.R);
+                int rx = Math.Min(x1, x2), rz = Math.Min(z1, z2);
+                var coord = new Int3(ox + 3 * st.OX + rx, floorY + 3 * st.Floor + t.Y, oz + 3 * st.OZ + rz);
+                if (coord.X < 0 || coord.Y < 0 || coord.Z < 0 || coord.X >= size.X || coord.Y >= size.Y || coord.Z >= size.Z)
+                { outside++; continue; }
+                bool clash = placedBy.TryGetValue(coord, out var p) && p != s;
+                if (t.Ext == Ext.Side && volume.TryGetValue(coord, out var v) && v != s) clash = true;
+                // Under-blocks that are taller than 1 or whitelisted are never removed.
+                if (t.Ext == Ext.Under && (fy > 1 || underWhitelist.Contains(t.Name))) clash = false;
+                if (clash) { extDropped++; continue; }
+
+                // Checkpoint modules driven against their arrow get the checkpoint turned around.
+                int turn = st.Rev && t.Name.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
+
+                map.PlaceBlock(new CGameCtnBlock
                 {
-                    var coord = new Int3(ox + 3 * ax + lx, y, oz + 3 * az + lz);
-                    if (!placedBy.TryAdd(coord, s)) continue;
-                    map.PlaceBlock(roofBlock, coord, Direction.North);
-                    roofs++;
-                }
+                    Name = t.Name,
+                    Direction = (Direction)((t.Dir + st.R + turn) % 4),
+                    Coord = coord,
+                    Flags = t.Flags & ~RefBits,
+                });
+                placedBy.TryAdd(coord, s);
+                if (t.Ext != Ext.None) exts++; else bodies++;
+            }
+        }
+    }
+
+    if (roofBlock is not null)
+    {
+        for (int s = 0; s < rt.Count; s++)
+        {
+            var st = rt[s];
+            int y = floorY + 3 * (st.Floor + st.M.Span);
+            if (y >= size.Y) continue;
+            foreach (var (ax, az) in st.Cells)
+                for (int lx = 0; lx < 3; lx++)
+                    for (int lz = 0; lz < 3; lz++)
+                    {
+                        var coord = new Int3(ox + 3 * ax + lx, y, oz + 3 * az + lz);
+                        if (!placedBy.TryAdd(coord, s)) continue;
+                        map.PlaceBlock(roofBlock, coord, Direction.North);
+                        roofs++;
+                    }
+        }
     }
 }
 
@@ -482,6 +492,57 @@ map.MapName = newName ?? fileStem;
 map.MapUid = NewUid(); // so the maze doesn't clash with the base map in the game's track list
 
 outPath ??= Path.Combine(outDir, fileStem + ".Challenge.Gbx");
+
+Build(route);
+long Measure() { using var ms = new MemoryStream(); gbx.Save(ms); return ms.Length; }
+long fileSize = Measure();
+long limitBytes = maxKb * 1024L;
+int fullLength = route.Count;
+if (maxMode && maxKb > 0 && fileSize > limitBytes)
+{
+    // Too big: find the longest start of the route that still ends in a finish and fits the size limit.
+    List<Step>? Truncated(int keep)
+    {
+        for (int k = keep; k >= 1; k--)
+        {
+            occupied.Clear();
+            foreach (var st in route.Take(k))
+            {
+                int low = st.M.NoBelow ? Math.Max(0, st.Floor - 1) : st.Floor, high = st.Floor + st.M.Span + (st.M.NoAbove ? 1 : 0);
+                foreach (var (ax, az) in st.Cells)
+                    for (int f = low; f < high; f++) occupied.Add((ax, az, f));
+            }
+            var last = route[k - 1];
+            if (last.Out is not Opening o) continue;
+            var (dx, dz) = Vec(o.Side);
+            var fin = Options(last.OX + o.CX + dx, last.OZ + o.CZ + dz, ((o.Side + 2) % 4, last.Floor + o.Up, o.Narrow), x => x.Kind == "finish");
+            if (fin.Count == 0) continue;
+            var f0 = fin[0];
+            return [.. route.Take(k), new Step(f0.M, f0.R, f0.Origin.X, f0.Origin.Z, f0.Floor, f0.Cells, f0.Rev)];
+        }
+        return null;
+    }
+
+    List<Step>? fitting = null;
+    int lo = 1, hi = route.Count - 2; // number of steps kept before the finish
+    while (lo <= hi)
+    {
+        int mid = (lo + hi) / 2;
+        var candidate = Truncated(mid);
+        if (candidate is null) { hi = mid - 1; continue; }
+        Build(candidate);
+        if (Measure() <= limitBytes) { fitting = candidate; lo = mid + 1; }
+        else hi = mid - 1;
+    }
+    if (fitting is null)
+    {
+        Console.Error.WriteLine($"Couldn't get the maze under {maxKb} KB.");
+        return 3;
+    }
+    route = fitting;
+    Build(route);
+    fileSize = Measure();
+}
 gbx.Save(outPath);
 
 // ------------------------------------------------------------------ report
@@ -489,6 +550,8 @@ int floors = route.Max(s => s.Floor + s.M.Span);
 int cpCount = route.Where(s => s.M.Kind == "checkpoint").Count();
 Console.WriteLine($"Maze: {route.Count} modules, {cpCount} checkpoint(s), {floors} floor(s), grid {W}x{D}, seed {usedSeed}");
 if (underWhitelist.Count > 0) Console.WriteLine($"Whitelist: {underWhitelist.Count} block type(s) kept under modules ({string.Join(", ", underWhitelist)}).");
+Console.WriteLine($"File size: {fileSize / 1024.0:0.#} KB" + (route.Count < fullLength ? $" (route shortened from {fullLength} modules to stay under {maxKb} KB)" : ""));
+if (!maxMode && fileSize > 256 * 1024) Console.WriteLine("Warning: over 256 KB, too big to upload to TMX / online servers.");
 if (fit) Console.WriteLine($"Map size set to {size.X}x{size.Y}x{size.Z} (needs TMUnlimiter if bigger than 32).");
 if (test) Console.WriteLine($"Test mode: all {modules.Count} modules used, {route.Count - modules.Count} repeat(s) to connect them.");
 Console.WriteLine($"Blocks: {bodies} module, {exts} extension ({extDropped} dropped for overlapping), {roofs} roof"
@@ -683,6 +746,8 @@ SIZE
                             (needs TMUnlimiter for maps bigger than 32; coordinates up to 255)
       --max                 As long a maze as possible (turns on --fit); -l caps it (default 2000)
       --budget n            --max: placement attempts to search (default 1000000)
+      --max-kb n            --max: shorten the route until the file is at most n KB
+                            (default 256 = TMX / server upload limit; 0 = no limit)
 
 MODES
   -t, --test                One route through every module in modules.txt (ignores -l and checkpoints)
@@ -712,7 +777,7 @@ EXAMPLES
 record struct Opening(int CX, int CZ, int Side, int Up, bool Narrow);
 enum Ext { None, Side, Under }
 record Tpl(string Name, int X, int Y, int Z, int Dir, int Flags, Ext Ext);
-record Step(Module M, int R, int OX, int OZ, int Floor, List<(int, int)> Cells, bool Rev);
+record Step(Module M, int R, int OX, int OZ, int Floor, List<(int, int)> Cells, bool Rev, Opening? Out = null);
 
 class Module(string id, int x, int z, int wc, int dc, string kind, List<(Opening? In, Opening? Out, bool Rev)> routes, int span)
 {
