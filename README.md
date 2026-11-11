@@ -75,7 +75,7 @@ How it works:
 
 Map size: by default the maze fits the standard 32×32×32 Stadium. `--fit` ignores that, builds freely, then sizes the map to the maze. Block coordinates can go up to 255. Maps bigger than 32 need TMUnlimiter. You have to manually remove the stadium with TMUnlimiter.
 
-`--max` builds as long a maze as possible. It then shortens the route until the file is at most 256 KB, the upload limit on TMX and online servers (`--max-kb` changes the limit, `0` turns it off).
+`--max` builds as long a maze as possible. It then shortens the route until the file is at most 256 KB (the game might still crash so try lowering it), the upload limit on TMX and online servers (`--max-kb` changes the limit, `0` turns it off).
 
 ## tmblocks
 
