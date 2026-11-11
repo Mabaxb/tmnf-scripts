@@ -73,7 +73,7 @@ How it works:
 - **Checkpoints** are placed every 3–6 modules by default (`--cp-gap`, `--cp-every`, `-c`).
 - **Output** is named `maze1`, `maze2`, … (`--rn` sets your own name).
 
-Map size: by default the maze fits the standard 32×32×32 Stadium. `--fit` ignores that, builds freely, then sizes the map to the maze. Block coordinates can go up to 255. Maps bigger than 32 need TMUnlimiter.
+Map size: by default the maze fits the standard 32×32×32 Stadium. `--fit` ignores that, builds freely, then sizes the map to the maze. Block coordinates can go up to 255. Maps bigger than 32 need TMUnlimiter. You have to manually remove the stadium with TMUnlimiter.
 
 ## tmblocks
 
