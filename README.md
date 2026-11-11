@@ -1,6 +1,6 @@
 # tmnf-scripts
 
-C# scripts that use [GBX.NET](https://github.com/BigBang1112/gbx-net) to edit TrackMania Nations Forever map files (`.Challenge.Gbx`).
+C# scripts that use [GBX.NET](https://github.com/BigBang1112/gbx-net) by BigBang1112 to edit TrackMania Nations Forever map files (`.Challenge.Gbx`).
 
 | Script | What it does |
 |---|---|
